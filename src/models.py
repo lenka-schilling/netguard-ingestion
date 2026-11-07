@@ -1,32 +1,22 @@
 import uuid
 from datetime import datetime
+from pydantic import BaseModel, Field
 
-class Flow:
-    def __init__(self, src_ip, dst_ip, src_port, dst_port, protocol, timestamp):
-        self.flow_id = str(uuid.uuid4())
-        self.ingested_at = datetime.utcnow().isoformat()
-        self.start_timestamp = timestamp
-        self.end_timestamp = timestamp
-        self.src_ip = src_ip
-        self.dst_ip = dst_ip
-        self.src_port = src_port
-        self.dst_port = dst_port
-        self.protocol = protocol
-        self.packet_count = 1
-        self.byte_count = 0
+class Flow(BaseModel):
+    flow_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    ingested_at: str = Field(default_factory=lambda: datetime.utcnow().isoformat())
+    start_timestamp: float
+    end_timestamp: float
+    src_ip: str
+    dst_ip: str
+    src_port: int
+    dst_port: int
+    protocol: str
+    packet_count: int = 1
+    byte_count: int = 0
 
     def to_dict(self):
-        duration = round(self.end_timestamp - self.start_timestamp, 6)
-        return {
-            "flow_id": self.flow_id,
-            "ingested_at": self.ingested_at,
-            "start_timestamp": self.start_timestamp,
-            "duration": duration,
-            "src_ip": self.src_ip,
-            "dst_ip": self.dst_ip,
-            "src_port": self.src_port,
-            "dst_port": self.dst_port,
-            "protocol": self.protocol,
-            "packet_count": self.packet_count,
-            "byte_count": self.byte_count
-        }
+        data = self.model_dump()
+        data["duration"] = round(self.end_timestamp - self.start_timestamp, 6)
+        
+        return data

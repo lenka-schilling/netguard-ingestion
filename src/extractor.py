@@ -106,7 +106,8 @@ def extract_flows(file_path: str):
                     src_port=src_port,
                     dst_port=dst_port,
                     protocol=protocol,
-                    timestamp=timestamp
+                    start_timestamp=timestamp,
+                    end_timestamp=timestamp
                 )
                 new_flow.byte_count = len(buf)
                 flows[flow_key] = new_flow
