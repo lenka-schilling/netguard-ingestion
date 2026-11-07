@@ -16,7 +16,7 @@ import random
 import time
 from collections import Counter, namedtuple
 
-from src.scenarios import SCENARIO_DEFAULTS, SCENARIOS, normal_traffic
+from src.simulator.scenarios import SCENARIO_DEFAULTS, SCENARIOS, normal_traffic
 
 logger = logging.getLogger("NetGuard.Simulator")
 

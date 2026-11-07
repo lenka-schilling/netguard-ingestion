@@ -7,8 +7,8 @@ from collections import Counter
 from statistics import median
 
 from src.models import Flow
-from src.scenarios import CLIENTS
-from src.simulator import WARMUP, TrafficSimulator, main
+from src.simulator.scenarios import CLIENTS
+from src.simulator.simulator import WARMUP, TrafficSimulator, main
 
 START = 1_700_000_000.0
 ALL_SCENARIOS = ["port_scan", "dos", "brute_force", "abnormal_pattern"]
