@@ -20,8 +20,23 @@ class WindowsConfig(BaseModel):
             raise ValueError("window sizes must be unique")
         return sorted(v)
 
+class RuleThresholds(BaseModel):
+    port_scan_unique_ports: int = 30
+    dos_connections: int = 500
+    brute_force_connections: int = 50
+    abnormal_dst_addrs: int = 40
+
+class MLConfig(BaseModel):
+    z_score_threshold: float = 3.0
+    min_samples: int = 10
+
+class DetectionConfig(BaseModel):
+    rules: RuleThresholds = Field(default_factory=RuleThresholds)
+    ml: MLConfig = Field(default_factory=MLConfig)
+
 class Config(BaseModel):
     windows: WindowsConfig
+    detection: DetectionConfig = Field(default_factory=DetectionConfig)
 
 def load_config(path: Optional[str] = None) -> Config:
     chosen = Path(path or os.environ.get(ENV_VAR) or DEFAULT_PATH)
