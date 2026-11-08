@@ -2,6 +2,7 @@ import dpkt
 import logging
 import socket
 import json
+import sys
 from src.importer import load_pcap_file
 from src.models import Flow
 
@@ -128,8 +129,8 @@ if __name__ == '__main__':
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
     )
 
-    test_file = "data/tcp-ethereal-file1.trace"
+    test_file = sys.argv[1] if len(sys.argv) > 1 else "data/sample.pcap"
     results = extract_flows(test_file)
 
     for flow_json in results:
-        print(json.dumps(flow_json, indent=2))
+        print(json.dumps(flow_json))

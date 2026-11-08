@@ -1,3 +1,30 @@
 windows:
   sizes_s: [1, 10, 60]  #dlugosci okien
   lateness_s: 1         #ile czekamy na spoznione flowy
+
+detection:
+  rules:
+    port_scan:
+      unique_dst_ports: {1: 20, 10: 50, 60: 100}
+    dos_like:
+      connections: {1: 500, 10: 2000}
+    brute_force:
+      attempts: {10: 15, 60: 30}
+      ports: [21, 22, 23, 3389]
+    #TODO: powinno byc odchylenie od baselinu
+    abnormal:
+      unique_dst_addrs: {10: 40, 60: 80}
+  ml:
+    windows: [1, 10]
+    z_score_threshold: 3.0
+    alpha: 0.05
+    min_samples: 30
+    min_sigma: 1.0
+    ttl_s: 300
+
+alerts:
+  cooldown_s: 30
+  severity:
+    medium: 2.0
+    high: 5.0
+    critical: 10.0
