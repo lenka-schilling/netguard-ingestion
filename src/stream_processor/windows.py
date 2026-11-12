@@ -1,17 +1,24 @@
 import logging
 import math
-from collections import Counter
+from collections import Counter, deque
 from src.messages import WindowFeatures
 
 logger = logging.getLogger("NetGuard.Windows")
 
 TOP_TARGETS = 5
 
+def is_new_connection(flow):
+    flags = flow.get("tcp_flags")
+    if flow.get("protocol") != "TCP" or not flags:
+        return True
+    return "SYN" in flags.split(",")
+
 class Bucket:
-    __slots__ = ("connections", "packets", "bytes", "dst_ports", "peers", "targets", "last_ingested_at")
+    __slots__ = ("connections", "new_conns", "packets", "bytes", "dst_ports", "peers", "targets", "last_ingested_at")
 
     def __init__(self):
         self.connections = 0
+        self.new_conns = 0
         self.packets = 0
         self.bytes = 0
         self.dst_ports = set()
@@ -20,7 +27,7 @@ class Bucket:
         self.last_ingested_at = None
 
 class WindowProcessor:
-    def __init__(self, key_type="src_ip", window_sizes=(1, 10, 60), lateness_s=1):
+    def __init__(self, key_type="src_ip", window_sizes=(1, 10, 60), lateness_s=1, dedup_ttl_s=60):
         if key_type not in ("src_ip", "dst_ip"):
             raise ValueError("key_type must be 'src_ip' or 'dst_ip'")
         self.key_type = key_type
@@ -32,10 +39,14 @@ class WindowProcessor:
         self._max_ts = None
         self.processed = 0
         self.late = 0
+        self.duplicates = 0
+        self.dedup_ttl_s = dedup_ttl_s
+        self._seen = {}
+        self._seen_order = deque()
 
     @classmethod
     def from_config(cls, key_type, windows_cfg):
-        return cls(key_type, window_sizes=windows_cfg.sizes_s, lateness_s=windows_cfg.lateness_s)
+        return cls(key_type, window_sizes=windows_cfg.sizes_s, lateness_s=windows_cfg.lateness_s, dedup_ttl_s=windows_cfg.dedup_ttl_s)
 
 
     """Dodaje flow, zwraca liste window features dla sekund ktore sie zamknely"""
@@ -51,6 +62,15 @@ class WindowProcessor:
             self.late += 1
             logger.debug("Late flow dropped: %s (ts=%s)", flow.get("flow_id"), ts)
             return []
+
+        flow_id = flow.get("flow_id")
+        if flow_id is not None:
+            if flow_id in self._seen:
+                self.duplicates += 1
+                logger.debug("Duplicate flow dropped: %s", flow_id)
+                return []
+            self._seen[flow_id] = sec
+            self._seen_order.append((sec, flow_id))
 
         bucket = self.state.setdefault(flow[self.key_type], {}).setdefault(sec, Bucket())
         self._update(bucket, flow)
@@ -70,6 +90,8 @@ class WindowProcessor:
 
     def _update(self, b, flow):
         b.connections += 1
+        if is_new_connection(flow):
+            b.new_conns += 1
         b.packets += flow.get("packet_count", 1)
         b.bytes += flow.get("byte_count", 0)
         b.dst_ports.add(flow["dst_port"])
@@ -92,7 +114,14 @@ class WindowProcessor:
             out.extend(self._evaluate(s))
             self._expire(s)
             self._next = s + 1
+        self._purge_seen()
         return out
+
+    def _purge_seen(self):
+        limit = self._next - self.dedup_ttl_s
+        while self._seen_order and self._seen_order[0][0] < limit:
+            _, flow_id = self._seen_order.popleft()
+            self._seen.pop(flow_id, None)
 
     def _evaluate(self, s):
         out = []
@@ -116,6 +145,7 @@ class WindowProcessor:
 
     def _build(self, key, w, start, end, used):
         conns = sum(b.connections for b in used)
+        new_conns = sum(b.new_conns for b in used)
         packets = sum(b.packets for b in used)
         nbytes = sum(b.bytes for b in used)
         ports, peers = set(), set()
@@ -130,7 +160,7 @@ class WindowProcessor:
             "bytes_per_s": nbytes / w,
             "unique_dst_ports": len(ports),
             peer_name: len(peers),
-            "new_conn_rate": conns / w    #potem tylko SYN??
+            "new_conn_rate": new_conns / w    
         }
         targets = []
         if self.key_type == "src_ip":

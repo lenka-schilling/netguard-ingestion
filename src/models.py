@@ -1,5 +1,6 @@
 import uuid
 from datetime import datetime
+from typing import Optional
 from pydantic import BaseModel, Field
 
 class Flow(BaseModel):
@@ -14,6 +15,7 @@ class Flow(BaseModel):
     protocol: str
     packet_count: int = 1
     byte_count: int = 0
+    tcp_flags: Optional[str] = None
 
     def to_dict(self):
         data = self.model_dump()

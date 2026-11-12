@@ -8,6 +8,11 @@ from src.models import Flow
 
 logger = logging.getLogger("NetGuard.Extractor")
 
+TCP_FLAG_NAMES = (
+    (dpkt.tcp.TH_SYN, "SYN"), (dpkt.tcp.TH_ACK, "ACK"), (dpkt.tcp.TH_FIN, "FIN"),
+    (dpkt.tcp.TH_RST, "RST"), (dpkt.tcp.TH_PUSH, "PSH"), (dpkt.tcp.TH_URG, "URG"),
+)
+
 def inet_to_str(inet):
     """Converts a binary IP address to a string format with validation."""
     try:
@@ -22,6 +27,13 @@ def is_valid_port(port):
     """Validates that a port falls within the standard network range (0-65535)."""
     return isinstance(port, int) and 0 <= port <= 65535
 
+def flags_to_str(mask: int):
+    names = [name for bit, name in TCP_FLAG_NAMES if mask & bit]
+    return ",".join(names) or None
+
+def is_syn_ack(mask: int) -> bool:
+    return bool(mask & dpkt.tcp.TH_SYN) and bool(mask & dpkt.tcp.TH_ACK)
+
 def extract_flows(file_path: str):
     logger.info(f"Starting flow extraction process for: {file_path}")
     
@@ -32,6 +44,7 @@ def extract_flows(file_path: str):
         return []
 
     flows = {}
+    flow_flags = {}
     corrupted_packets = 0
     invalid_records = 0
 
@@ -75,11 +88,12 @@ def extract_flows(file_path: str):
                 
             ip = eth.data
             
-            src_port, dst_port, protocol = 0, 0, "OTHER"
+            src_port, dst_port, protocol, flags = 0, 0, "OTHER", 0
             if isinstance(ip.data, dpkt.tcp.TCP):
                 src_port = ip.data.sport
                 dst_port = ip.data.dport
                 protocol = "TCP"
+                flags = ip.data.flags
             elif isinstance(ip.data, dpkt.udp.UDP):
                 src_port = ip.data.sport
                 dst_port = ip.data.dport
@@ -92,26 +106,31 @@ def extract_flows(file_path: str):
                 invalid_records += 1
                 logger.debug(f"Invalid record dropped: src={src_ip}, dst={dst_ip}, ports=({src_port}, {dst_port})")
                 continue
+
+            a, b = (src_ip, src_port), (dst_ip, dst_port)
+            flow_key = (protocol,) + tuple(sorted((a,b)))
             
-            flow_key = (src_ip, dst_ip, src_port, dst_port, protocol)
-            
-            if flow_key in flows:
-                flow_obj = flows[flow_key]
-                flow_obj.packet_count += 1
-                flow_obj.byte_count += len(buf)
-                flow_obj.end_timestamp = timestamp
-            else:
-                new_flow = Flow(
-                    src_ip=src_ip,
-                    dst_ip=dst_ip,
-                    src_port=src_port,
-                    dst_port=dst_port,
+            flow_obj = flows.get(flow_key)
+            if flow_obj is None:
+                initiator, responder = (b, a) if is_syn_ack(flags) else (a, b)
+                flow_obj = Flow(
+                    src_ip=initiator[0], src_port=initiator[1],
+                    dst_ip=responder[0], dst_port=responder[1],
                     protocol=protocol,
                     start_timestamp=timestamp,
-                    end_timestamp=timestamp
+                    end_timestamp=timestamp,
                 )
-                new_flow.byte_count = len(buf)
-                flows[flow_key] = new_flow
+                flow_obj.byte_count = len(buf)
+                flows[flow_key] = flow_obj
+            else:
+                flow_obj.packet_count += 1
+                flow_obj.byte_count += len(buf)
+                flow_obj.start_timestamp = min(flow_obj.start_timestamp, timestamp)
+                flow_obj.end_timestamp = max(flow_obj.end_timestamp, timestamp)
+            flow_flags[flow_key] = flow_flags.get(flow_key, 0) | flags
+
+    for key, flow_obj in flows.items():
+        flow_obj.tcp_flags = flags_to_str(flow_flags.get(key, 0))
 
     extracted_flows = [flow.to_dict() for flow in flows.values()]
 

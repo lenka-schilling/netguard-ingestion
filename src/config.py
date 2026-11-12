@@ -13,6 +13,7 @@ PerWindow = dict[int, PositiveFloat]
 class WindowsConfig(BaseModel):
     sizes_s: list[int] = Field(min_length=1)
     lateness_s: float = Field(ge=0)
+    dedup_ttl_s: PositiveFloat
 
     @field_validator("sizes_s")
     @classmethod
