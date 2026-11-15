@@ -1,5 +1,3 @@
-import hashlib
-import json
 import logging
 import os
 from datetime import datetime, timezone
@@ -86,8 +84,7 @@ class ConfigRecord(Base):
     """Defines the 'configuration' table (detection configuration used for a run)."""
     __tablename__ = "configuration"
 
-    config_id = Column(String, primary_key=True)
-    saved_at = Column(String, nullable=False)
+    saved_at = Column(String, primary_key=True)
     data = Column(JSON, nullable=False)
 
 
@@ -114,16 +111,12 @@ def save_flows(flows: list[dict]) -> int:
     return len(flows)
 
 
-def save_config(cfg: Config) -> str:
-    """Saves the detection configuration; the id is a hash of its content, so the same config is stored once."""
-    data = cfg.model_dump(mode="json")
-    config_id = hashlib.sha1(json.dumps(data, sort_keys=True).encode()).hexdigest()
-
+def save_config(cfg: Config) -> None:
+    """Saves the detection configuration used for this run."""
     init_db()
     with SessionLocal() as session:
-        session.merge(ConfigRecord(config_id=config_id, saved_at=datetime.now(timezone.utc).isoformat(), data=data))
+        session.add(ConfigRecord(saved_at=datetime.now(timezone.utc).isoformat(), data=cfg.model_dump(mode="json")))
         session.commit()
-    return config_id
 
 
 def save_alerts(alerts: list[DetectionResults]) -> int:
@@ -195,35 +188,31 @@ def _iso_utc(dt: datetime) -> str:
     return (dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)).astimezone(timezone.utc).isoformat()
 
 
-def get_traffic_stats(window_s: int = 60) -> dict:
-    """Current traffic from the last window_s seconds and alert counts by type and severity.
+TRAFFIC_WINDOW_S = 60
+
+
+def get_traffic_stats() -> dict:
+    """Current traffic from the last 60 s and alert counts by type and severity.
     'Now' is the newest flow in the database, so the stats also make sense for old PCAP files."""
     init_db()
     with SessionLocal() as session:
         latest = session.query(func.max(FlowRecord.start_timestamp)).scalar()
-        flows = packets = bytes_ = sources = destinations = 0
+        flows = packets = bytes_ = destinations = 0
         if latest is not None:
-            flows, packets, bytes_, sources, destinations = session.query(
+            flows, packets, bytes_, destinations = session.query(
                 func.count(FlowRecord.flow_id),
                 func.coalesce(func.sum(FlowRecord.packet_count), 0),
                 func.coalesce(func.sum(FlowRecord.byte_count), 0),
-                func.count(func.distinct(FlowRecord.src_ip)),
                 func.count(func.distinct(FlowRecord.dst_ip)),
-            ).filter(FlowRecord.start_timestamp > latest - window_s).one()
+            ).filter(FlowRecord.start_timestamp > latest - TRAFFIC_WINDOW_S).one()
 
         by_type = dict(session.query(AlertRecord.type, func.count()).group_by(AlertRecord.type).all())
         by_severity = dict(session.query(AlertRecord.severity, func.count()).group_by(AlertRecord.severity).all())
 
     return {
-        "window_s": window_s,
-        "latest_flow_timestamp": latest,
         "flows": flows,
-        "packets": packets,
-        "bytes": bytes_,
-        "flows_per_s": round(flows / window_s, 3),
-        "packets_per_s": round(packets / window_s, 3),
-        "bytes_per_s": round(bytes_ / window_s, 3),
-        "unique_sources": sources,
+        "packets_per_s": round(packets / TRAFFIC_WINDOW_S, 3),
+        "bytes_per_s": round(bytes_ / TRAFFIC_WINDOW_S, 3),
         "unique_destinations": destinations,
         "alerts_by_type": by_type,
         "alerts_by_severity": by_severity,

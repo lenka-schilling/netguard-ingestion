@@ -76,16 +76,9 @@ def list_alerts(
 
 
 @app.get("/traffic/current")
-def current_traffic(
-    window_s: int = Query(
-        default=60,
-        ge=1,
-        le=3600,
-        description="Length of the recent period in seconds",
-    ),
-):
-    """Returns current traffic statistics and alert counts."""
-    return get_traffic_stats(window_s=window_s)
+def current_traffic():
+    """Returns current traffic statistics (last 60 s) and alert counts."""
+    return get_traffic_stats()
 
 
 @app.get("/alerts/{detection_id}")
