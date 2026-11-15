@@ -1,6 +1,7 @@
 import logging
 import sys
 
+from src.database import save_alerts
 from src.extractor import extract_flows
 from src.pipeline import run_flows
 
@@ -17,6 +18,9 @@ def run_pipeline(pcap_path: str):
 
     logger.info("Step 2: windows, detection and classification")
     alerts = run_flows(flows)
+
+    logger.info("Step 3: saving alerts to PostgreSQL database")
+    save_alerts(alerts)
 
     # Tymczasowo na ekran; docelowo broker i baza.
     logger.info("=== FINISHED. Alerts: %d ===", len(alerts))
