@@ -1,0 +1,166 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>NetGuard Dashboard</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+  <style>
+    :root { --brand: #5c1427; --brand-mid: #8b2341; --brand-soft: #f8ecef; --border: #ecd5db; }
+    body { font-family: system-ui, sans-serif; margin: 0; padding: 16px; background: #faf5f6; color: #1f2328; }
+    h1 { margin: 0 0 16px; padding: 16px 20px; font-size: 22px; color: #fff; border-radius: 8px;
+         background: linear-gradient(90deg, var(--brand), var(--brand-mid)); }
+    h2 { margin: 0 0 12px; font-size: 16px; color: var(--brand); }
+    section { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+    .tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .tile { background: var(--brand-soft); border: 1px solid var(--border); border-left: 4px solid var(--brand-mid);
+            border-radius: 6px; padding: 12px; }
+    .tile .label { font-size: 12px; color: #59636e; }
+    .tile .value { font-size: 24px; font-weight: 600; margin-top: 4px; color: var(--brand); }
+    .charts { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; margin-top: 16px; }
+    .chart-box { position: relative; height: 240px; }
+    .chart-box.wide { height: 200px; margin-bottom: 16px; }
+    .muted { color: #59636e; font-size: 13px; }
+    table { width: 100%; border-collapse: collapse; font-size: 14px; }
+    th { text-align: left; color: var(--brand); border-bottom: 2px solid var(--border); padding: 8px; }
+    td { border-bottom: 1px solid var(--border); padding: 8px; }
+    #error { color: #b42318; }
+  </style>
+</head>
+<body>
+  <h1>NetGuard — network monitoring</h1>
+  <p id="error"></p>
+
+  <!-- Monitorowanie ruchu i statystyki (F12, UC01) -->
+  <section>
+    <h2>Latest traffic (last 60 s of recorded data)</h2>
+    <div class="tiles">
+      <div class="tile"><div class="label">Flows</div><div class="value" id="flows">–</div></div>
+      <div class="tile"><div class="label">Packets / s</div><div class="value" id="packets_per_s">–</div></div>
+      <div class="tile"><div class="label">Bytes / s</div><div class="value" id="bytes_per_s">–</div></div>
+      <div class="tile"><div class="label">Unique destinations</div><div class="value" id="unique_destinations">–</div></div>
+    </div>
+    <div class="chart-box wide"><canvas id="packetsChart"></canvas></div>
+    <div class="chart-box wide"><canvas id="bytesChart"></canvas></div>
+    <p class="muted">Every 5 s the dashboard reads the last 60 s of recorded traffic from the database (counted back from
+      the newest stored flow, not from the clock) and adds a new point; a flat line means that no new traffic has arrived.</p>
+    <div class="charts">
+      <div class="chart-box"><canvas id="typeChart"></canvas></div>
+      <div class="chart-box"><canvas id="severityChart"></canvas></div>
+    </div>
+    <p class="muted">Last update: <span id="updated">–</span></p>
+  </section>
+
+  <!-- Lista najnowszych alertów (F12, UC01): GET /alerts -->
+  <section id="alerts">
+    <h2>Alerts</h2>
+    <!-- Do zrobienia: filtry (F13, UC03) - parametry start, end, type, severity, source w GET /alerts -->
+    <p class="muted">To do: filters (time, type, severity, source).</p>
+    <table>
+      <thead><tr><th>Time (local)</th><th>Type</th><th>Severity</th><th>Confidence</th><th>Source</th><th>Destination</th></tr></thead>
+      <tbody id="alertRows"><tr><td colspan="6" class="muted">No alerts</td></tr></tbody>
+    </table>
+  </section>
+
+  <!-- Szczegóły detekcji (F12, UC02): GET /alerts/{detection_id} -->
+  <section id="details">
+    <h2>Detection details</h2>
+    <p class="muted">To do: details of the selected alert (feature values, explanation).</p>
+  </section>
+
+  <script>
+    const REFRESH_S = 5;
+    const MAX_POINTS = 60;  // ile ostatnich odczytów pokazujemy na wykresie ruchu
+    const TYPES = ["PORT_SCAN", "DOS_LIKE", "BRUTE_FORCE", "ABNORMAL_CONN_PATTERN"];
+    const SEVERITIES = ["LOW", "MEDIUM", "HIGH", "CRITICAL"];
+    const SEVERITY_COLORS = ["#8c959f", "#d4a72c", "#e16f24", "#cf222e"];
+    const PACKETS_COLOR = "#5c1427";
+    const BYTES_COLOR = "#b04a63";
+
+    function lineChart(id, title, color) {
+      return new Chart(document.getElementById(id), {
+        type: "line",
+        data: { labels: [], datasets: [{ label: title, data: [], borderColor: color, backgroundColor: color }] },
+        options: { maintainAspectRatio: false, animation: false, locale: "en-US",
+                   plugins: { legend: { display: false }, title: { display: true, text: title } },
+                   scales: { x: { title: { display: true, text: "Time of reading (local)" } }, y: { beginAtZero: true } } },
+      });
+    }
+    // dwa osobne wykresy ze wspólną osią czasu - każdy ma jedną oś, więc czyta się je bez instrukcji
+    const trafficCharts = [
+      [lineChart("packetsChart", "Packets per second", PACKETS_COLOR), "packets_per_s"],
+      [lineChart("bytesChart", "Bytes per second", BYTES_COLOR), "bytes_per_s"],
+    ];
+
+    function barChart(id, title, labels, colors) {
+      return new Chart(document.getElementById(id), {
+        type: "bar",
+        data: { labels, datasets: [{ label: "Alerts", data: labels.map(() => 0), backgroundColor: colors }] },
+        options: { maintainAspectRatio: false, locale: "en-US", plugins: { legend: { display: false }, title: { display: true, text: title } },
+                   scales: { y: { beginAtZero: true, ticks: { precision: 0 } } } },
+      });
+    }
+    const typeChart = barChart("typeChart", "Alerts by type (all time)", TYPES, "#8b2341");
+    const severityChart = barChart("severityChart", "Alerts by severity (all time)", SEVERITIES, SEVERITY_COLORS);
+
+    function renderAlerts(alerts) {
+      const body = document.getElementById("alertRows");
+      body.replaceChildren();
+      if (!alerts.length) {
+        body.innerHTML = '<tr><td colspan="6" class="muted">No alerts</td></tr>';
+        return;
+      }
+      for (const a of alerts) {
+        const row = body.insertRow();
+        // textContent, a nie innerHTML - dane z bazy wstawiamy jako zwykły tekst
+        for (const value of [new Date(a.timestamp).toLocaleString("en-GB"), a.type, a.severity,
+                             a.confidence, a.source || "–", a.destination || "–"]) {
+          row.insertCell().textContent = value;
+        }
+        row.cells[2].style.color = SEVERITY_COLORS[SEVERITIES.indexOf(a.severity)];
+      }
+    }
+
+    async function refresh() {
+      try {
+        const res = await fetch("/traffic/current");
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const stats = await res.json();
+
+        for (const key of ["flows", "packets_per_s", "bytes_per_s", "unique_destinations"]) {
+          document.getElementById(key).textContent = stats[key].toLocaleString("en-US", { maximumFractionDigits: 1 });
+        }
+
+        // wszystkie godziny na stronie w czasie lokalnym i w tym samym formacie co w tabeli
+        const now = new Date().toLocaleTimeString("en-GB");
+        for (const [chart, key] of trafficCharts) {
+          chart.data.labels.push(now);
+          chart.data.datasets[0].data.push(stats[key]);
+          if (chart.data.labels.length > MAX_POINTS) {
+            chart.data.labels.shift();
+            chart.data.datasets[0].data.shift();
+          }
+          chart.update();
+        }
+
+        typeChart.data.datasets[0].data = TYPES.map(t => stats.alerts_by_type[t] || 0);
+        severityChart.data.datasets[0].data = SEVERITIES.map(s => stats.alerts_by_severity[s] || 0);
+        typeChart.update();
+        severityChart.update();
+
+        const alertsRes = await fetch("/alerts?limit=20");
+        if (!alertsRes.ok) throw new Error(`HTTP ${alertsRes.status}`);
+        renderAlerts((await alertsRes.json()).alerts);
+
+        document.getElementById("updated").textContent = now;
+        document.getElementById("error").textContent = "";
+      } catch (e) {
+        document.getElementById("error").textContent = `Cannot load data from the API: ${e.message}`;
+      }
+    }
+
+    refresh();
+    setInterval(refresh, REFRESH_S * 1000);
+  </script>
+</body>
+</html>
