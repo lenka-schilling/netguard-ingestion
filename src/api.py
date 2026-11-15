@@ -1,9 +1,13 @@
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.responses import FileResponse
 
 from src.database import get_alert_by_id, get_alerts, get_traffic_stats, init_db
+
+DASHBOARD_PATH = Path(__file__).resolve().parent / "dashboard.html"
 
 app = FastAPI(
     title="NetGuard Alert API",
@@ -22,8 +26,14 @@ def root():
     return {
         "service": "NetGuard API",
         "status": "running",
-        "endpoints": ["/alerts", "/alerts/{detection_id}", "/traffic/current", "/docs"],
+        "endpoints": ["/alerts", "/alerts/{detection_id}", "/traffic/current", "/dashboard", "/docs"],
     }
+
+
+@app.get("/dashboard", include_in_schema=False)
+def dashboard():
+    """Serves the monitoring dashboard (a single page that reads data from this API)."""
+    return FileResponse(DASHBOARD_PATH)
 
 
 @app.get("/alerts")
