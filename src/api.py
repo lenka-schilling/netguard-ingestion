@@ -1,8 +1,9 @@
+from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Query
 
-from src.database import get_alert_by_id, get_alerts, init_db
+from src.database import get_alert_by_id, get_alerts, get_traffic_stats, init_db
 
 app = FastAPI(
     title="NetGuard Alert API",
@@ -21,7 +22,7 @@ def root():
     return {
         "service": "NetGuard API",
         "status": "running",
-        "endpoints": ["/alerts", "/alerts/{detection_id}", "/docs"],
+        "endpoints": ["/alerts", "/alerts/{detection_id}", "/traffic/current", "/docs"],
     }
 
 
@@ -49,6 +50,14 @@ def list_alerts(
         le=1000,
         description="Maximum number of alerts to return",
     ),
+    start: Optional[datetime] = Query(
+        default=None,
+        description="Only alerts created at or after this time (ISO 8601, UTC if no timezone)",
+    ),
+    end: Optional[datetime] = Query(
+        default=None,
+        description="Only alerts created at or before this time (ISO 8601, UTC if no timezone)",
+    ),
 ):
     """Returns stored alert history, optionally filtered by query parameters."""
     results = get_alerts(
@@ -57,11 +66,26 @@ def list_alerts(
         source=source,
         destination=destination,
         limit=limit,
+        start=start,
+        end=end,
     )
     return {
         "count": len(results),
         "alerts": results,
     }
+
+
+@app.get("/traffic/current")
+def current_traffic(
+    window_s: int = Query(
+        default=60,
+        ge=1,
+        le=3600,
+        description="Length of the recent period in seconds",
+    ),
+):
+    """Returns current traffic statistics and alert counts."""
+    return get_traffic_stats(window_s=window_s)
 
 
 @app.get("/alerts/{detection_id}")
