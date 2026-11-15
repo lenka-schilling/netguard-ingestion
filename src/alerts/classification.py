@@ -28,16 +28,23 @@ def explain(raw: RawDetection) -> str:
     if raw.method == Method.ZSCORE:
         c = raw.context
         return(f"{c['feature']} for {raw.key} reached {val:g} within {w} s, far from its rolling"
-               f"baseline (mean {c['mean']:.1f}, std {c['std']:.1f}): z = {c['z_score']:.1f} threshold {thr:g}.")
+               f" baseline (mean {c['mean']:.1f}, std {c['std']:.1f}): z = {c['z_score']:.1f} threshold {thr:g}.")
     t = raw.type
     if t == DetectionType.PORT_SCAN:
         target = f" on {raw.destination}" if raw.destination else ""
-        return (f"Source {raw.key} contacted {val:g} distinct destiantion ports{target} within {w} s (threshold {thr:g}).")
+        return (f"Source {raw.key} contacted {val:g} distinct destination ports{target} within {w} s (threshold {thr:g}).")
     if t == DetectionType.BRUTE_FORCE:
         return (f"Source {raw.key} made {val:g} connection attempts to {raw.destination}:"
                 f"{raw.context.get('port')} within {w} s (threshold {thr:g}).")
     if t == DetectionType.DOS_LIKE:
         n = raw.context.get("unique_src_addrs")
         srcs = f" from {n:g} distinct sources" if n else ""
-        return (f"Target {raw.key} received {val:g} connections{srcs} within {w} s (threshold {thr:g}).")
+        units = {"connections": "connections", "packets_per_s": "packets/s", "bytes_per_s": "bytes/s"}
+        unit = units.get(feature, feature)
+        return (f"Target {raw.key} received {val:g} {unit}{srcs} within {w} s (threshold {thr:g}).")
+    ctx = raw.context
+    if ctx.get("baseline_value") is not None:
+        who = f"group '{ctx['group']}'" if ctx.get("group") else "a typical source"
+        return(f"Source {raw.key}: {feature} = {val:g} within {w} s exceeds {thr:g}, i.e. "
+               f"{ctx['multiplier']:g}x the normal level of {who} ({ctx['baseline_value']:g}).")
     return (f"Source {raw.key} contacted {val:g} distinct destination addresses within {w} s (threshold {thr:g}).")
