@@ -25,6 +25,26 @@
     th { text-align: left; color: var(--brand); border-bottom: 2px solid var(--border); padding: 8px; }
     td { border-bottom: 1px solid var(--border); padding: 8px; }
     #error { color: #b42318; }
+    h3 { margin: 16px 0 8px; font-size: 14px; color: var(--brand); }
+    .filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 12px;
+               padding: 12px; background: var(--brand-soft); border: 1px solid var(--border); border-radius: 6px; }
+    .filter-field { display: flex; flex-direction: column; gap: 4px; font-size: 12px; color: #59636e; }
+    .filter-field input, .filter-field select { padding: 6px 8px; border: 1px solid var(--border); border-radius: 4px;
+                                                font-size: 13px; background: #fff; color: #1f2328; }
+    .btn { padding: 7px 14px; border: 1px solid var(--brand-mid); border-radius: 4px; background: var(--brand);
+           color: #fff; font-size: 13px; cursor: pointer; }
+    .btn:hover { background: var(--brand-mid); }
+    .btn.secondary { background: #fff; color: var(--brand); }
+    .btn.secondary:hover { background: var(--brand-soft); }
+    #alertRows tr.clickable { cursor: pointer; }
+    #alertRows tr.clickable:hover { background: var(--brand-soft); }
+    #alertRows tr.selected { background: #f1d8df; font-weight: 500; }
+    .explanation-box { background: var(--brand-soft); border-left: 4px solid var(--brand); padding: 12px;
+                       border-radius: 4px; font-size: 14px; margin-bottom: 16px; }
+    .detail-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px; margin-bottom: 16px; }
+    .detail-item { padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: #fff; }
+    .detail-item .label { font-size: 11px; color: #59636e; text-transform: uppercase; }
+    .detail-item .val { font-size: 14px; font-weight: 600; margin-top: 2px; color: #1f2328; word-break: break-all; }
   </style>
 </head>
 <body>
@@ -54,8 +74,47 @@
   <!-- Lista najnowszych alertów (F12, UC01): GET /alerts -->
   <section id="alerts">
     <h2>Alerts</h2>
-    <!-- Do zrobienia: filtry (F13, UC03) - parametry start, end, type, severity, source w GET /alerts -->
-    <p class="muted">To do: filters (time, type, severity, source).</p>
+    <!-- Filtry (F13, UC03) - parametry start, end, type, severity, source w GET /alerts -->
+    <form id="filterForm" class="filters">
+      <label class="filter-field">From (local)
+        <input type="datetime-local" id="filterStart" step="1">
+      </label>
+      <label class="filter-field">To (local)
+        <input type="datetime-local" id="filterEnd" step="1">
+      </label>
+      <label class="filter-field">Type
+        <select id="filterType">
+          <option value="">All types</option>
+          <option value="PORT_SCAN">PORT_SCAN</option>
+          <option value="DOS_LIKE">DOS_LIKE</option>
+          <option value="BRUTE_FORCE">BRUTE_FORCE</option>
+          <option value="ABNORMAL_CONN_PATTERN">ABNORMAL_CONN_PATTERN</option>
+        </select>
+      </label>
+      <label class="filter-field">Severity
+        <select id="filterSeverity">
+          <option value="">All severities</option>
+          <option value="LOW">LOW</option>
+          <option value="MEDIUM">MEDIUM</option>
+          <option value="HIGH">HIGH</option>
+          <option value="CRITICAL">CRITICAL</option>
+        </select>
+      </label>
+      <label class="filter-field">Source IP
+        <input type="text" id="filterSource" placeholder="e.g. 198.51.100.23">
+      </label>
+      <label class="filter-field">Limit
+        <select id="filterLimit">
+          <option value="20" selected>20</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+          <option value="500">500</option>
+        </select>
+      </label>
+      <button type="submit" class="btn">Apply filters</button>
+      <button type="button" id="resetFilters" class="btn secondary">Reset</button>
+    </form>
+    <p class="muted">Showing <span id="alertCount">0</span> alert(s). Click a row to inspect details below.</p>
     <table>
       <thead><tr><th>Time (local)</th><th>Type</th><th>Severity</th><th>Confidence</th><th>Source</th><th>Destination</th></tr></thead>
       <tbody id="alertRows"><tr><td colspan="6" class="muted">No alerts</td></tr></tbody>
@@ -65,7 +124,16 @@
   <!-- Szczegóły detekcji (F12, UC02): GET /alerts/{detection_id} -->
   <section id="details">
     <h2>Detection details</h2>
-    <p class="muted">To do: details of the selected alert (feature values, explanation).</p>
+    <p id="detailsPlaceholder" class="muted">Select an alert from the table above to view its explanation, metadata, and observed feature values.</p>
+    <div id="detailsContent" style="display: none;">
+      <div class="explanation-box" id="detailExplanation"></div>
+      <div class="detail-grid" id="detailMeta"></div>
+      <h3>Observed features &amp; thresholds</h3>
+      <table>
+        <thead><tr><th>Feature / Parameter</th><th>Value</th></tr></thead>
+        <tbody id="detailFeatures"></tbody>
+      </table>
+    </div>
   </section>
 
   <script>
@@ -103,8 +171,30 @@
     const typeChart = barChart("typeChart", "Alerts by type (all time)", TYPES, "#8b2341");
     const severityChart = barChart("severityChart", "Alerts by severity (all time)", SEVERITIES, SEVERITY_COLORS);
 
+    let selectedAlertId = null;
+
+    // buduje query string z formularza filtrów dla GET /alerts (F13)
+    function buildAlertsQuery() {
+      const params = new URLSearchParams();
+      const startVal = document.getElementById("filterStart").value;
+      const endVal = document.getElementById("filterEnd").value;
+      const typeVal = document.getElementById("filterType").value;
+      const sevVal = document.getElementById("filterSeverity").value;
+      const srcVal = document.getElementById("filterSource").value.trim();
+      const limitVal = document.getElementById("filterLimit").value || "20";
+
+      if (startVal) params.set("start", new Date(startVal).toISOString());
+      if (endVal) params.set("end", new Date(endVal).toISOString());
+      if (typeVal) params.set("type", typeVal);
+      if (sevVal) params.set("severity", sevVal);
+      if (srcVal) params.set("source", srcVal);
+      params.set("limit", limitVal);
+      return params.toString();
+    }
+
     function renderAlerts(alerts) {
       const body = document.getElementById("alertRows");
+      document.getElementById("alertCount").textContent = alerts.length;
       body.replaceChildren();
       if (!alerts.length) {
         body.innerHTML = '<tr><td colspan="6" class="muted">No alerts</td></tr>';
@@ -112,14 +202,100 @@
       }
       for (const a of alerts) {
         const row = body.insertRow();
+        row.className = a.detection_id === selectedAlertId ? "clickable selected" : "clickable";
+        row.dataset.id = a.detection_id;
         // textContent, a nie innerHTML - dane z bazy wstawiamy jako zwykły tekst
         for (const value of [new Date(a.timestamp).toLocaleString("en-GB"), a.type, a.severity,
                              a.confidence, a.source || "–", a.destination || "–"]) {
           row.insertCell().textContent = value;
         }
         row.cells[2].style.color = SEVERITY_COLORS[SEVERITIES.indexOf(a.severity)];
+        row.addEventListener("click", () => selectAlert(a.detection_id));
       }
     }
+
+    // pobiera szczegóły wybranego alertu z GET /alerts/{detection_id} (F12, UC02)
+    async function selectAlert(detectionId) {
+      selectedAlertId = detectionId;
+      for (const tr of document.querySelectorAll("#alertRows tr")) {
+        tr.classList.toggle("selected", tr.dataset.id === detectionId);
+      }
+      try {
+        const res = await fetch(`/alerts/${encodeURIComponent(detectionId)}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const alert = await res.json();
+        renderAlertDetails(alert);
+      } catch (e) {
+        document.getElementById("error").textContent = `Cannot load alert details: ${e.message}`;
+      }
+    }
+
+    function renderAlertDetails(a) {
+      document.getElementById("detailsPlaceholder").style.display = "none";
+      document.getElementById("detailsContent").style.display = "block";
+      document.getElementById("detailExplanation").textContent = a.explanation || "No explanation available.";
+
+      const winRange = `${new Date(a.window_start * 1000).toLocaleTimeString("en-GB")} – ${new Date(a.window_end * 1000).toLocaleTimeString("en-GB")}`;
+      const metaItems = [
+        ["Detection ID", a.detection_id],
+        ["Time (local)", new Date(a.timestamp).toLocaleString("en-GB")],
+        ["Type", a.type],
+        ["Severity", a.severity],
+        ["Confidence", a.confidence],
+        ["Method", a.method],
+        ["Source IP", a.source || "–"],
+        ["Destination IP", a.destination || "–"],
+        ["Time window", `${a.time_window_s} s (${winRange})`],
+        ["Latency", a.latency_ms != null ? `${a.latency_ms} ms` : "–"],
+      ];
+
+      const metaContainer = document.getElementById("detailMeta");
+      metaContainer.replaceChildren();
+      for (const [label, val] of metaItems) {
+        const item = document.createElement("div");
+        item.className = "detail-item";
+        const lbl = document.createElement("div");
+        lbl.className = "label";
+        lbl.textContent = label;
+        const v = document.createElement("div");
+        v.className = "val";
+        v.textContent = val;
+        if (label === "Severity") {
+          v.style.color = SEVERITY_COLORS[SEVERITIES.indexOf(a.severity)];
+        }
+        item.append(lbl, v);
+        metaContainer.appendChild(item);
+      }
+
+      const featBody = document.getElementById("detailFeatures");
+      featBody.replaceChildren();
+      for (const [k, v] of Object.entries(a.feature_values || {})) {
+        const r = featBody.insertRow();
+        r.insertCell().textContent = k;
+        r.insertCell().textContent = typeof v === "number" ? v.toLocaleString("en-US", { maximumFractionDigits: 3 }) : String(v);
+      }
+    }
+
+    async function loadAlertsOnly() {
+      try {
+        const alertsRes = await fetch(`/alerts?${buildAlertsQuery()}`);
+        if (!alertsRes.ok) throw new Error(`HTTP ${alertsRes.status}`);
+        renderAlerts((await alertsRes.json()).alerts);
+        document.getElementById("error").textContent = "";
+      } catch (e) {
+        document.getElementById("error").textContent = `Cannot load alerts: ${e.message}`;
+      }
+    }
+
+    document.getElementById("filterForm").addEventListener("submit", (e) => {
+      e.preventDefault();
+      loadAlertsOnly();
+    });
+
+    document.getElementById("resetFilters").addEventListener("click", () => {
+      document.getElementById("filterForm").reset();
+      loadAlertsOnly();
+    });
 
     async function refresh() {
       try {
@@ -148,7 +324,7 @@
         typeChart.update();
         severityChart.update();
 
-        const alertsRes = await fetch("/alerts?limit=20");
+        const alertsRes = await fetch(`/alerts?${buildAlertsQuery()}`);
         if (!alertsRes.ok) throw new Error(`HTTP ${alertsRes.status}`);
         renderAlerts((await alertsRes.json()).alerts);
 

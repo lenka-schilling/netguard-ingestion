@@ -52,8 +52,7 @@ def poisson_times(rng, rate, start, end):
 
 def _flow(ts, src_ip, dst_ip, src_port, dst_port, protocol, duration, packets, byte_count):
     flow = Flow(src_ip=src_ip, dst_ip=dst_ip, src_port=src_port, dst_port=dst_port,
-                protocol=protocol, timestamp=ts)
-    flow.end_timestamp = ts + duration
+                protocol=protocol, start_timestamp=ts, end_timestamp=ts + duration)
     flow.packet_count = packets
     flow.byte_count = byte_count
     return flow

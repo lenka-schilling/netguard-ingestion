@@ -187,7 +187,7 @@ class TestTrafficSimulator(unittest.TestCase):
         self.assertEqual(sum(truth["flow_counts"].values()), len(flows))
         self.assertEqual(truth["episodes"][0]["scenario"], "brute_force")
         self.assertEqual(truth["flow_counts"]["brute_force"], truth["episodes"][0]["flow_count"])
-        self.assertEqual(set(flows[0]), set(Flow("10.0.0.1", "10.0.0.2", 1, 2, "TCP", 0.0).to_dict()))
+        self.assertEqual(set(flows[0]), set(Flow(src_ip="10.0.0.1", dst_ip="10.0.0.2", src_port=1, dst_port=2, protocol="TCP", start_timestamp=0.0, end_timestamp=0.0).to_dict()))
 
 
 if __name__ == "__main__":

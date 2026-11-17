@@ -17,9 +17,9 @@ class TestNetGuardIngestion(unittest.TestCase):
             src_port=54321,
             dst_port=80,
             protocol="TCP",
-            timestamp=1000.0
+            start_timestamp=1000.0,
+            end_timestamp=1002.5
         )
-        flow.end_timestamp = 1002.5
         flow.packet_count = 3
         flow.byte_count = 450
 
