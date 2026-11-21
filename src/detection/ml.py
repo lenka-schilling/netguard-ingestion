@@ -69,6 +69,7 @@ class ZScoreDetector:
                         last_ingested_at=window.last_ingested_at, observed={feature: x}, 
                         treshold={feature: self.cfg.z_score_threshold}, ratio=z / self.cfg.z_score_threshold,
                         context={"feature": feature, "z_score": z, "mean": st.mean, "std": sigma},
+                        flow_ids=list(window.flow_ids),
                     ))
                     logger.debug("zscore hit: %s key=%s %s=%s z=%.1f", dtype, window.key, feature, x, z)
             if tumbling and not anomalous:

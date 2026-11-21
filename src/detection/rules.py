@@ -128,6 +128,6 @@ class RuleDetector:
             method=Method.RULE, type=dtype, key_type=w.key_type, key=w.key,
             destination=destination, window_size_s=w.window_size_s, window_start=w.window_start,
             window_end=w.window_end, last_ingested_at=w.last_ingested_at,
-            observed={feature: value}, treshold={feature: thr}, 
-            ratio=value / thr, context=context or {},
+            observed={feature: value}, treshold={feature: thr},
+            ratio=value / thr, context=context or {}, flow_ids=list(w.flow_ids),
         )

@@ -40,6 +40,7 @@ class AlertRecord(Base):
     method = Column(String, nullable=False)
     feature_values = Column(JSON, nullable=False)
     explanation = Column(Text, nullable=False)
+    flow_ids = Column(JSON, nullable=True)
     latency_ms = Column(Float, nullable=True)
 
     def to_dict(self) -> dict:
@@ -57,6 +58,7 @@ class AlertRecord(Base):
             "method": self.method,
             "feature_values": self.feature_values,
             "explanation": self.explanation,
+            "flow_ids": self.flow_ids or [],
             "latency_ms": self.latency_ms,
         }
 
@@ -94,21 +96,62 @@ def init_db() -> None:
     logger.info("Database initialized (tables 'alerts', 'flows', 'configuration' ready).")
 
 
-def save_flows(flows: list[dict]) -> int:
-    """Saves extracted flows (dicts from Flow.to_dict()) into PostgreSQL."""
-    if not flows:
+def _normalize_flow(flow) -> dict:
+    if hasattr(flow, "flow"):
+        flow = flow.flow
+    if isinstance(flow, dict):
+        data = dict(flow)
+    elif hasattr(flow, "model_dump"):
+        data = flow.model_dump()
+    elif hasattr(flow, "to_dict"):
+        data = flow.to_dict()
+    else:
+        data = {
+            k: getattr(flow, k)
+            for k in (
+                "flow_id",
+                "ingested_at",
+                "start_timestamp",
+                "end_timestamp",
+                "duration",
+                "src_ip",
+                "dst_ip",
+                "src_port",
+                "dst_port",
+                "protocol",
+                "packet_count",
+                "byte_count",
+                "tcp_flags",
+            )
+            if hasattr(flow, k)
+        }
+
+    if data.get("duration") is None:
+        start = data.get("start_timestamp")
+        end = data.get("end_timestamp")
+        if start is not None and end is not None:
+            data["duration"] = max(0.0, float(end) - float(start))
+        else:
+            data["duration"] = 0.0
+    return data
+
+
+def save_flows(flows) -> int:
+    """Saves extracted or simulated flows (dicts, Flow or SimulatedFlow) into PostgreSQL."""
+    flow_list = list(flows)
+    if not flow_list:
         return 0
 
     init_db()
     columns = [c.name for c in FlowRecord.__table__.columns]
     with SessionLocal() as session:
-        for flow in flows:
-            # the same flow_id saved again does not create a duplicate
-            session.merge(FlowRecord(**{c: flow.get(c) for c in columns}))
+        for flow in flow_list:
+            data = _normalize_flow(flow)
+            session.merge(FlowRecord(**{c: data.get(c) for c in columns}))
         session.commit()
 
-    logger.info("Saved %d flow(s) to PostgreSQL.", len(flows))
-    return len(flows)
+    logger.info("Saved %d flow(s) to PostgreSQL.", len(flow_list))
+    return len(flow_list)
 
 
 def save_config(cfg: Config) -> None:
@@ -141,6 +184,7 @@ def save_alerts(alerts: list[DetectionResults]) -> int:
                 method=alert.method,
                 feature_values=alert.feature_values,
                 explanation=alert.explanation,
+                flow_ids=alert.flow_ids,
                 latency_ms=alert.latency_ms,
             )
             # merge() inserts new alerts and safely updates existing ones if you re-run the same PCAP

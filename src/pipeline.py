@@ -13,6 +13,8 @@ logger = logging.getLogger("NetGuard.Pipeline")
 
 
 def _start(flow):
+    if hasattr(flow, "flow"):
+        flow = flow.flow
     return flow["start_timestamp"] if isinstance(flow, dict) else flow.start_timestamp
 
 

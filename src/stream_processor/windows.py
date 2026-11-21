@@ -6,6 +6,9 @@ from src.messages import WindowFeatures
 logger = logging.getLogger("NetGuard.Windows")
 
 TOP_TARGETS = 5
+MAX_FLOW_IDS_PER_BUCKET = 200
+MAX_FLOW_IDS_PER_WINDOW = 200
+
 
 def is_new_connection(flow):
     flags = flow.get("tcp_flags")
@@ -13,8 +16,19 @@ def is_new_connection(flow):
         return True
     return "SYN" in flags.split(",")
 
+
 class Bucket:
-    __slots__ = ("connections", "new_conns", "packets", "bytes", "dst_ports", "peers", "targets", "last_ingested_at")
+    __slots__ = (
+        "connections",
+        "new_conns",
+        "packets",
+        "bytes",
+        "dst_ports",
+        "peers",
+        "targets",
+        "last_ingested_at",
+        "flow_ids",
+    )
 
     def __init__(self):
         self.connections = 0
@@ -25,6 +39,8 @@ class Bucket:
         self.peers = set()
         self.targets = {}
         self.last_ingested_at = None
+        self.flow_ids = []
+
 
 class WindowProcessor:
     def __init__(self, key_type="src_ip", window_sizes=(1, 10, 60), lateness_s=1, dedup_ttl_s=60):
@@ -46,13 +62,21 @@ class WindowProcessor:
 
     @classmethod
     def from_config(cls, key_type, windows_cfg):
-        return cls(key_type, window_sizes=windows_cfg.sizes_s, lateness_s=windows_cfg.lateness_s, dedup_ttl_s=windows_cfg.dedup_ttl_s)
-
+        return cls(
+            key_type,
+            window_sizes=windows_cfg.sizes_s,
+            lateness_s=windows_cfg.lateness_s,
+            dedup_ttl_s=windows_cfg.dedup_ttl_s,
+        )
 
     """Dodaje flow, zwraca liste window features dla sekund ktore sie zamknely"""
     def add(self, flow):
+        if hasattr(flow, "flow"):
+            flow = flow.flow
         if hasattr(flow, "to_dict"):
             flow = flow.to_dict()
+        elif hasattr(flow, "model_dump"):
+            flow = flow.model_dump()
 
         ts = flow["start_timestamp"]
         sec = math.floor(ts)
@@ -80,7 +104,6 @@ class WindowProcessor:
             self._max_ts = ts
         return self._close_until(math.floor(self._max_ts - self.lateness_s))
 
-
     """koniec danych - zamykamy sekundy"""
     def flush(self):
         if self._next is None or not self.state:
@@ -103,6 +126,9 @@ class WindowProcessor:
         ing = flow.get("ingested_at")
         if ing and (b.last_ingested_at is None or ing > b.last_ingested_at):
             b.last_ingested_at = ing
+        fid = flow.get("flow_id")
+        if fid is not None and len(b.flow_ids) < MAX_FLOW_IDS_PER_BUCKET:
+            b.flow_ids.append(str(fid))
 
     def _close_until(self, limit):
         out = []
@@ -160,7 +186,7 @@ class WindowProcessor:
             "bytes_per_s": nbytes / w,
             "unique_dst_ports": len(ports),
             peer_name: len(peers),
-            "new_conn_rate": new_conns / w    
+            "new_conn_rate": new_conns / w,
         }
         targets = []
         if self.key_type == "src_ip":
@@ -180,7 +206,26 @@ class WindowProcessor:
                 })
         ingested = [b.last_ingested_at for b in used if b.last_ingested_at]
 
+        collected_ids = []
+        seen_ids = set()
+        for b in used:
+            for fid in b.flow_ids:
+                if fid not in seen_ids:
+                    seen_ids.add(fid)
+                    collected_ids.append(fid)
+                    if len(collected_ids) >= MAX_FLOW_IDS_PER_WINDOW:
+                        break
+            if len(collected_ids) >= MAX_FLOW_IDS_PER_WINDOW:
+                break
+
         return WindowFeatures(
-            key_type=self.key_type, key=key, window_size_s=w, window_start=float(start), window_end=float(end), 
-            last_ingested_at=max(ingested) if ingested else None, features=features, targets=targets,
+            key_type=self.key_type,
+            key=key,
+            window_size_s=w,
+            window_start=float(start),
+            window_end=float(end),
+            last_ingested_at=max(ingested) if ingested else None,
+            features=features,
+            targets=targets,
+            flow_ids=collected_ids,
         )

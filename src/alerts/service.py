@@ -8,8 +8,21 @@ logger = logging.getLogger("NetGuard.Alerts")
 
 """tu dopiero tworzymy alerty - czyli bierzemy rawdetection i nadajemy mu severity, confidence itp"""
 
+MAX_ALERT_FLOW_IDS = 500
+
+
 class _Active:
-    __slots__ = ("detection_id", "methods", "best", "best_by_method", "last_end", "created_at", "latency_ms")
+    __slots__ = (
+        "detection_id",
+        "methods",
+        "best",
+        "best_by_method",
+        "last_end",
+        "created_at",
+        "latency_ms",
+        "flow_ids",
+        "_seen_flows",
+    )
 
     def __init__(self, raw: RawDetection):
         self.detection_id = raw.detection_id
@@ -19,6 +32,15 @@ class _Active:
         self.last_end = raw.window_end
         self.created_at = datetime.now(timezone.utc)
         self.latency_ms = _latency_ms(raw.last_ingested_at, self.created_at)
+        self.flow_ids = []
+        self._seen_flows = set()
+        self._extend_flows(raw.flow_ids)
+
+    def _extend_flows(self, ids):
+        for fid in ids or ():
+            if fid not in self._seen_flows and len(self.flow_ids) < MAX_ALERT_FLOW_IDS:
+                self._seen_flows.add(fid)
+                self.flow_ids.append(fid)
 
     def add(self, raw: RawDetection):
         self.methods.add(raw.method)
@@ -28,6 +50,8 @@ class _Active:
         if cur is None or raw.ratio > cur.ratio:
             self.best_by_method[raw.method] = raw
         self.last_end = max(self.last_end, raw.window_end)
+        self._extend_flows(raw.flow_ids)
+
 
 def _latency_ms(ingested_at, now):
     if not ingested_at:
@@ -39,6 +63,7 @@ def _latency_ms(ingested_at, now):
     if t.tzinfo is None:
         t = t.replace(tzinfo=timezone.utc)
     return round((now - t).total_seconds() * 1000, 1)
+
 
 class AlertService:
     def __init__(self, cfg: AlertConfig):
@@ -57,7 +82,14 @@ class AlertService:
             act = self._active.get(mk)
             if act is None or raw.window_end - act.last_end > self.cfg.cooldown_s:
                 act = self._active[mk] = _Active(raw)
-                logger.info("new detection %s: %s key=%s window=%ss ratio=%.1f", act.detection_id[:8], raw.type, raw.key, raw.window_size_s, raw.ratio)
+                logger.info(
+                    "new detection %s: %s key=%s window=%ss ratio=%.1f",
+                    act.detection_id[:8],
+                    raw.type,
+                    raw.key,
+                    raw.window_size_s,
+                    raw.ratio,
+                )
             else:
                 act.add(raw)
             det = self._build(act)
@@ -82,7 +114,11 @@ class AlertService:
         by_source = r.key_type == "src_ip"
         values = dict(r.observed)
         values.update({f"threshold_{k}": v for k, v in r.treshold.items()})
-        values.update({k: float(v) for k, v in r.context.items() if isinstance(v, (int, float)) and not isinstance(v, bool)})
+        values.update({
+            k: float(v)
+            for k, v in r.context.items()
+            if isinstance(v, (int, float)) and not isinstance(v, bool)
+        })
         return DetectionResults(
             detection_id=a.detection_id,
             timestamp=a.created_at.isoformat(),
@@ -97,7 +133,6 @@ class AlertService:
             method="+".join(sorted(a.methods)),
             feature_values=values,
             explanation=" ".join(explain(a.best_by_method[m]) for m in sorted(a.best_by_method)),
+            flow_ids=list(a.flow_ids),
             latency_ms=a.latency_ms,
         )
-
-        
