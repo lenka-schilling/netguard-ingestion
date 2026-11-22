@@ -1,7 +1,7 @@
 """Pełny obieg bez brokera i bazy: flowy -> okna -> detekcje -> alarmy.
 Osobno od main.py (które czyta PCAP), żeby dało się to testować na gotowych flowach."""
 import logging
-from typing import Iterable, Optional
+from typing import Callable, Iterable, Optional
 
 from src.alerts.service import AlertService
 from src.broker import ALERTS_STREAM, DEFAULT_GROUP, WINDOWS_STREAM, RedisStreamBroker
@@ -85,12 +85,14 @@ def run_detection_worker(
     consumer_name: str = "worker-1",
     max_empty_polls: Optional[int] = None,
     block_ms: int = 500,
+    on_alerts: Optional[Callable[[list[DetectionResults]], None]] = None,
 ) -> list[DetectionResults]:
-    """Konsumuje WindowFeatures z brokera, uruchamia detekcję i publikuje DetectionResults."""
+    """Konsumuje WindowFeatures z brokera, uruchamia detekcję, publikuje DetectionResults i wywołuje on_alerts."""
     cfg = config or load_config()
     b = broker or RedisStreamBroker()
     engine = DetectionEngine(cfg)
     service = AlertService(cfg.alerts)
+    seen_ids: set[str] = set()
 
     empty_polls = 0
     while True:
@@ -110,12 +112,19 @@ def run_detection_worker(
             continue
 
         empty_polls = 0
+        new_alerts: list[DetectionResults] = []
         for msg_id, window in batch_items:
             raws = engine.process(window)
             if raws:
                 alerts = service.process(raws)
                 for alert in alerts:
                     b.publish_model(stream=alerts_stream, model=alert)
+                    if alert.detection_id not in seen_ids:
+                        seen_ids.add(alert.detection_id)
+                        new_alerts.append(alert)
             b.ack(windows_stream, group, msg_id)
+
+        if new_alerts and on_alerts is not None:
+            on_alerts(new_alerts)
 
     return service.detections

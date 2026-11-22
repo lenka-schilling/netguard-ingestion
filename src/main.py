@@ -7,6 +7,7 @@ from src.config import load_config
 from src.database import save_alerts, save_config, save_flows
 from src.extractor import extract_flows
 from src.pipeline import publish_windows_from_flows, run_detection_worker, run_flows
+from src.messages import DetectionResults
 
 logger = logging.getLogger("NetGuard.Main")
 
@@ -70,9 +71,17 @@ def main(argv: Optional[list[str]] = None) -> None:
     if args.worker:
         broker = RedisStreamBroker()
         logger.info("Starting broker detection worker as '%s'...", args.consumer_name)
-        alerts = run_detection_worker(broker=broker, config=cfg, consumer_name=args.consumer_name)
-        if persist and alerts:
-            save_alerts(alerts)
+
+        def _persist_batch(batch: list[DetectionResults]) -> None:
+            logger.info("Persisting %d new alert(s) to PostgreSQL...", len(batch))
+            save_alerts(batch)
+
+        run_detection_worker(
+            broker=broker,
+            config=cfg,
+            consumer_name=args.consumer_name,
+            on_alerts=_persist_batch if persist else None,
+        )
         return
 
     target_file = args.pcap or "data/http.cap"
