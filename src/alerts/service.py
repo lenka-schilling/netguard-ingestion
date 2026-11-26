@@ -113,7 +113,7 @@ class AlertService:
         r = a.best
         by_source = r.key_type == "src_ip"
         values = dict(r.observed)
-        values.update({f"threshold_{k}": v for k, v in r.treshold.items()})
+        values.update({f"threshold_{k}": v for k, v in r.threshold.items()})
         values.update({
             k: float(v)
             for k, v in r.context.items()

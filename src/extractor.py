@@ -3,6 +3,7 @@ import logging
 import socket
 import json
 import sys
+from typing import Iterator
 from src.importer import load_pcap_file
 from src.models import Flow
 
@@ -34,19 +35,27 @@ def flags_to_str(mask: int):
 def is_syn_ack(mask: int) -> bool:
     return bool(mask & dpkt.tcp.TH_SYN) and bool(mask & dpkt.tcp.TH_ACK)
 
-def extract_flows(file_path: str):
+def _finalize_flow(key, flows: dict, flow_flags: dict) -> dict:
+    flow_obj = flows.pop(key)
+    mask = flow_flags.pop(key, 0)
+    flow_obj.tcp_flags = flags_to_str(mask)
+    return flow_obj.to_dict()
+
+def extract_flows(file_path: str, idle_timeout_s: float = 1.0, max_active_flows: int = 50_000) -> Iterator[dict]:
     logger.info(f"Starting flow extraction process for: {file_path}")
     
     try:
         file_obj, pcap_reader = load_pcap_file(file_path)
     except Exception:
         logger.error(f"Extraction aborted due to import failure for: {file_path}")
-        return []
+        return 
 
-    flows = {}
-    flow_flags = {}
+    flows: dict = {}
+    flow_flags: dict = {}
     corrupted_packets = 0
     invalid_records = 0
+    emitted_count = 0
+    last_sweep_ts = None
 
     with file_obj:
         while True:
@@ -107,6 +116,18 @@ def extract_flows(file_path: str):
                 logger.debug(f"Invalid record dropped: src={src_ip}, dst={dst_ip}, ports=({src_port}, {dst_port})")
                 continue
 
+            if last_sweep_ts is None:
+                last_sweep_ts = timestamp
+            elif (timestamp - last_sweep_ts) >= 1.0 or len(flows) > max_active_flows:
+                expired_keys = [
+                    k for k, f in flows.items()
+                    if (timestamp - f.end_timestamp) >= idle_timeout_s
+                ]
+                for k in expired_keys:
+                    emitted_count += 1
+                    yield _finalize_flow(k, flows, flow_flags)
+                last_sweep_ts = timestamp
+
             a, b = (src_ip, src_port), (dst_ip, dst_port)
             flow_key = (protocol,) + tuple(sorted((a,b)))
             
@@ -129,18 +150,20 @@ def extract_flows(file_path: str):
                 flow_obj.end_timestamp = max(flow_obj.end_timestamp, timestamp)
             flow_flags[flow_key] = flow_flags.get(flow_key, 0) | flags
 
-    for key, flow_obj in flows.items():
-        flow_obj.tcp_flags = flags_to_str(flow_flags.get(key, 0))
+            if protocol == "TCP" and (flags & dpkt.tcp.TH_RST):
+                emitted_count += 1
+                yield _finalize_flow(flow_key, flows, flow_flags)
 
-    extracted_flows = [flow.to_dict() for flow in flows.values()]
+    for k in list(flows.keys()):
+        emitted_count += 1
+        yield _finalize_flow(k, flows, flow_flags)
 
     logger.info(
         f"Extraction finished successfully. "
-        f"Processed Flows: {len(extracted_flows)}, "
+        f"Processed Flows: {emitted_count}, "
         f"Corrupted Packets Skipped: {corrupted_packets}, "
         f"Invalid Records Skipped: {invalid_records}"
     )
-    return extracted_flows
 
 if __name__ == '__main__':
     logging.basicConfig(

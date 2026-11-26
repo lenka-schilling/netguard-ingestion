@@ -1,6 +1,6 @@
 windows:
   sizes_s: [1, 10, 60]  #dlugosci okien
-  lateness_s: 1         #ile czekamy na spoznione flowy
+  lateness_s: 2         #ile czekamy na spoznione flowy
   dedup_ttl_s: 60       #jak dlugo pamietamy flow_id do odrzucania dupliaktow
 
 detection:

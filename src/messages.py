@@ -53,7 +53,7 @@ class RawDetection(BaseModel):
     window_end: float
     last_ingested_at: Optional[str] = None
     observed: dict[str, float]
-    treshold: dict[str, float]
+    threshold: dict[str, float]
     ratio: float = Field(gt=0)
     context: dict[str, Any] = Field(default_factory=dict)
     flow_ids: list[str] = Field(default_factory=list)

@@ -23,7 +23,7 @@ def explain(raw: RawDetection) -> str:
     """tekst dla operatora czyli co zaobserwowano jaki prog i w jakim oknie"""
     w = raw.window_size_s
     feature, val = next(iter(raw.observed.items()))
-    thr = raw.treshold[feature]
+    thr = raw.threshold[feature]
 
     if raw.method == Method.ZSCORE:
         c = raw.context

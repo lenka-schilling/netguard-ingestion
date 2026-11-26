@@ -67,7 +67,7 @@ class ZScoreDetector:
                         destination=window.key if window.key_type == "dst_ip" else None,
                         window_size_s=w, window_start=window.window_start, window_end=window.window_end,
                         last_ingested_at=window.last_ingested_at, observed={feature: x}, 
-                        treshold={feature: self.cfg.z_score_threshold}, ratio=z / self.cfg.z_score_threshold,
+                        threshold={feature: self.cfg.z_score_threshold}, ratio=z / self.cfg.z_score_threshold,
                         context={"feature": feature, "z_score": z, "mean": st.mean, "std": sigma},
                         flow_ids=list(window.flow_ids),
                     ))

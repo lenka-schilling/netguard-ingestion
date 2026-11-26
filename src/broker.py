@@ -11,9 +11,11 @@ logger = logging.getLogger("NetGuard.Broker")
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 DEFAULT_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+FLOWS_STREAM = os.getenv("NETGUARD_FLOWS_STREAM", "netguard.flows")
 WINDOWS_STREAM = os.getenv("NETGUARD_WINDOWS_STREAM", "netguard.windows")
 ALERTS_STREAM = os.getenv("NETGUARD_ALERTS_STREAM", "netguard.alerts")
 DEFAULT_GROUP = os.getenv("NETGUARD_CONSUMER_GROUP", "netguard-workers")
+PERSISTER_GROUP = os.getenv("NETGUARD_PERSISTER_GROUP", "flow-persister")
 
 
 class RedisStreamBroker:

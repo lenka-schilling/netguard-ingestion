@@ -135,7 +135,7 @@ def main(argv=None):
     m = baseline.meta
     print(f"\nHosts in baseline period: {m['hosts_total']}, with enough samples (>= {m['min_host_samples']}): {m['hosts_with_profile']}")
     print(f"\nTYPICAL SOURCE PROFILE (baseline = {args.statistic} per host, {args.typical_quantile:.0%} quantile)")
-    print(f"\n{'feature':<18}{'win':>5}{'samples':>9}{'hosts':>8}{'baseline':>9}{'alert tresh':>14}")
+    print(f"\n{'feature':<18}{'win':>5}{'samples':>9}{'hosts':>8}{'baseline':>9}{'alert thresh':>14}")
     for f, per_w in section["baseline"].items():
         for w, norm in per_w.items():
             s = baseline.stats[f][w]
@@ -143,7 +143,7 @@ def main(argv=None):
             print(f"{f:<18}{w:>4}s{s.n:>9,}{s.n_keys:>8}{norm:>9.2f}{'> ' + format(thr, '.1f'):>14}")
 
     if section["groups"]:
-        print("\nHOSTS WITH DIFFERENT BASELINE: in normal traffic they exceed typical host tresholds so they would get fake alerts "
+        print("\nHOSTS WITH DIFFERENT BASELINE: in normal traffic they exceed typical host thresholds so they would get fake alerts "
               "\n If its know infrastructure (e.g. DNS) add them to abnormal.groups (or use --with-groups):")
         for name, g in section["groups"].items():
             what = "rule disabled" if not g["enabled"] else f"multiplier x{g['multiplier']:g}"

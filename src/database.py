@@ -15,7 +15,7 @@ logger = logging.getLogger("NetGuard.Database")
 # postgresql://<user>:<password>@<host>:<port>/<database_name>
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://netguard:netguard@localhost:5432/netguard",
+    "postgresql+pg8000://netguard:netguard@localhost:5432/netguard",
 )
 
 engine = create_engine(DATABASE_URL)
