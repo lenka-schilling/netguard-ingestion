@@ -14,7 +14,7 @@ from src.persistor import run_flow_persister
 logger = logging.getLogger("NetGuard.Main")
 
 
-def run_producer(pcap_path: str, persist_config: bool = True) -> int:
+def run_producer(pcap_path: str, persist_config: bool = True, batch_size = 500) -> int:
     logger.info("=== STARTING NETGUARD PRODUCER (Flow Extractor) ===")
     logger.info("Streaming flows from %s to '%s'", pcap_path, FLOWS_STREAM)
 
@@ -23,12 +23,17 @@ def run_producer(pcap_path: str, persist_config: bool = True) -> int:
         save_config(load_config())
 
     published = 0
+    batch: list[Flow] = []
     for flow_dict in extract_flows(pcap_path):
-        flow_model = Flow.model_validate(flow_dict)
-        broker.publish_model(stream=FLOWS_STREAM, model=flow_model)
-        published += 1
-        if published % 500 == 0:
-            logger.info("Published %d flows to broker", published)
+        batch.append(Flow.model_validate(flow_dict))
+        if len(batch) >= batch_size:
+            published += broker.publish_batch(stream=FLOWS_STREAM, models=batch)
+            batch.clear()
+            if published % 2000 == 0:
+                logger.info("Published %d flows to broker", published)
+
+    if batch:
+        published += broker.publish_batch(stream=FLOWS_STREAM, models=batch)
 
     logger.info("=== FINISHED PRODUCER (total flows: %d) ===", published)
     return published

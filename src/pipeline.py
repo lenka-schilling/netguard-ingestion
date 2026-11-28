@@ -4,7 +4,7 @@ import logging
 from typing import Callable, Iterable, Optional
 
 from src.alerts.service import AlertService
-from src.broker import ALERTS_STREAM, DEFAULT_GROUP, FLOWS_STREAM, RedisStreamBroker
+from src.broker import DEFAULT_GROUP, FLOWS_STREAM, RedisStreamBroker
 from src.config import Config, load_config
 from src.detection.engine import DetectionEngine
 from src.messages import DetectionResults, WindowFeatures
@@ -62,7 +62,6 @@ def run_detection_worker(
     broker: Optional[RedisStreamBroker] = None,
     config: Optional[Config] = None,
     flows_stream: str = FLOWS_STREAM,
-    alerts_stream: str = ALERTS_STREAM,
     group: str = DEFAULT_GROUP,
     consumer_name: str = "worker-1",
     max_empty_polls: Optional[int] = None,
@@ -96,7 +95,7 @@ def run_detection_worker(
             for p in processors:
                 flushed_windows.extend(p.flush())
             if flushed_windows:
-                _process_windows(flushed_windows, engine, service, b, alerts_stream, seen_ids, on_alerts)
+                _process_windows(flushed_windows, engine, service, seen_ids, on_alerts)
 
             if max_empty_polls is not None and empty_polls >= max_empty_polls:
                 break
@@ -111,7 +110,7 @@ def run_detection_worker(
             b.ack(flows_stream, group, msg_id)
 
         if windows_to_check:
-            _process_windows(windows_to_check, engine, service, b, alerts_stream, seen_ids, on_alerts)            
+            _process_windows(windows_to_check, engine, service, seen_ids, on_alerts)            
 
     return service.detections
 
@@ -119,8 +118,6 @@ def _process_windows(
         windows: list[WindowFeatures],
         engine: DetectionEngine,
         service: AlertService,
-        broker: RedisStreamBroker,
-        alerts_stream: str,
         seen_ids: set[str],
         on_alerts: Optional[Callable[[list[DetectionResults]], None]],
 ) -> None:
@@ -130,7 +127,6 @@ def _process_windows(
         if raws:
             alerts = service.process(raws)
             for alert in alerts:
-                broker.publish_model(stream=alerts_stream, model=alert)
                 if alert.detection_id not in seen_ids:
                     seen_ids.add(alert.detection_id)
                     new_alerts.append(alert)

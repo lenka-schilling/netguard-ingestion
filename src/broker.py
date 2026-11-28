@@ -12,8 +12,6 @@ ModelT = TypeVar("ModelT", bound=BaseModel)
 
 DEFAULT_REDIS_URL = os.getenv("REDIS_URL", "redis://localhost:6379/0")
 FLOWS_STREAM = os.getenv("NETGUARD_FLOWS_STREAM", "netguard.flows")
-WINDOWS_STREAM = os.getenv("NETGUARD_WINDOWS_STREAM", "netguard.windows")
-ALERTS_STREAM = os.getenv("NETGUARD_ALERTS_STREAM", "netguard.alerts")
 DEFAULT_GROUP = os.getenv("NETGUARD_CONSUMER_GROUP", "netguard-workers")
 PERSISTER_GROUP = os.getenv("NETGUARD_PERSISTER_GROUP", "flow-persister")
 
@@ -57,6 +55,16 @@ class RedisStreamBroker:
         )
         logger.debug("Published %s to %s (id=%s)", type(model).__name__, stream, msg_id)
         return msg_id
+
+    def publish_batch(self, stream: str, models: list[BaseModel], maxlen: int = 100_000) -> int:
+        if not models:
+            return 0
+        pipe = self.client.pipeline(transaction=False)
+        for model in models:
+            payload = model.model_dump_json()
+            pipe.xadd(stream, {"payload": payload}, maxlen=maxlen, approximate=True)
+        pipe.execute()
+        return len(models)
 
     def consume_models(
         self,
